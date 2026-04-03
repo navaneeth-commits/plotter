@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Canvas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero hero-compact">
+      <div class="hero-copy">
+        <p class="eyebrow">Data Canvas</p>
+        <h1>Upload, map, and chart.</h1>
+      </div>
+    </header>
+
+    <main class="app-grid">
+      <section class="panel controls-panel">
+        <div class="panel-header">
+          <h2>Controls</h2>
+          <p>Load data, choose fields, and generate views.</p>
+        </div>
+
+        <label class="upload-zone" for="file-input">
+          <input id="file-input" type="file" accept=".csv,.txt,.xls,.xlsx">
+          <span class="upload-title">Select a dataset</span>
+          <span class="upload-subtitle">or drag and drop it here</span>
+        </label>
+
+        <div id="file-status" class="status-pill muted">No file loaded yet.</div>
+        <p id="processing-hint" class="inline-hint" hidden>Large files are sampled for analysis so chart setup stays responsive.</p>
+
+        <div class="config-block">
+          <div class="config-head">
+            <h3>Charts</h3>
+            <p>Select one or more chart types.</p>
+          </div>
+          <div id="chart-options" class="chart-options">
+            <label><input type="checkbox" value="scatter" checked> Scatter</label>
+            <label><input type="checkbox" value="line"> Line</label>
+            <label><input type="checkbox" value="bar"> Bar</label>
+            <label><input type="checkbox" value="histogram"> Histogram</label>
+            <label><input type="checkbox" value="box"> Box</label>
+            <label><input type="checkbox" value="pie"> Pie</label>
+          </div>
+        </div>
+
+        <div class="config-block selectors">
+          <div>
+            <label for="x-axis">X Axis / Category</label>
+            <select id="x-axis" title="Choose a category, label, or date field for the horizontal axis"></select>
+          </div>
+          <div>
+            <label for="y-axis">Y Axis / Value</label>
+            <select id="y-axis" title="Choose a numeric field for chart values"></select>
+          </div>
+          <div>
+            <label for="group-axis">Group / Color</label>
+            <select id="group-axis" title="Optionally split the chart into color groups"></select>
+          </div>
+        </div>
+
+        <div class="config-block selector-help">
+          <div id="selector-groups" class="selector-groups empty-state">
+            Load a file to browse grouped column options.
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="generate-btn" type="button">Add To Dashboard</button>
+          <button id="smart-dashboard-btn" type="button">Build Smart Dashboard</button>
+          <button id="clear-plots-btn" type="button" class="secondary">Clear Plots</button>
+          <button id="clear-btn" type="button" class="secondary">Reset All</button>
+        </div>
+
+        <div class="config-block">
+          <div class="config-head">
+            <h3>Recommendations</h3>
+            <p>Suggested chart and field combinations.</p>
+          </div>
+          <div id="recommendations" class="recommendations empty-state">
+            Load a file to see recommended plot combinations.
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace-panel">
+        <section class="panel preview-panel">
+          <div class="panel-header">
+            <h2>Dataset Snapshot</h2>
+            <p>Preview, inferred types, and quick stats.</p>
+          </div>
+
+          <div id="dataset-summary" class="summary-grid">
+            <article>
+              <span>Rows</span>
+              <strong id="row-count">0</strong>
+            </article>
+            <article>
+              <span>Columns</span>
+              <strong id="column-count">0</strong>
+            </article>
+            <article>
+              <span>Numeric</span>
+              <strong id="numeric-count">0</strong>
+            </article>
+          </div>
+
+          <div class="inspect-tools">
+            <label class="search-field" for="column-search">
+              <span>Search Columns</span>
+              <input id="column-search" type="search" placeholder="Search by column name">
+            </label>
+            <div id="column-filter-tabs" class="filter-tabs">
+              <button type="button" class="filter-chip active" data-filter="all">All</button>
+              <button type="button" class="filter-chip" data-filter="numeric">Numeric</button>
+              <button type="button" class="filter-chip" data-filter="category">Category</button>
+              <button type="button" class="filter-chip" data-filter="date">Date</button>
+              <button type="button" class="filter-chip" data-filter="id">ID</button>
+              <button type="button" class="filter-chip" data-filter="other">Other</button>
+            </div>
+          </div>
+
+          <div id="column-meta" class="column-meta empty-state">
+            Load a file to inspect column types.
+          </div>
+
+          <div class="table-wrap">
+            <table id="preview-table">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel chart-panel">
+          <div class="panel-header chart-header">
+            <div>
+              <h2>Dashboard</h2>
+              <p>Charts appear here as you add them.</p>
+            </div>
+            <button id="chart-clear-inline-btn" type="button" class="secondary subtle-btn">Clear Charts</button>
+          </div>
+          <div id="chart-message" class="empty-state">Upload a dataset and click Add To Dashboard.</div>
+          <div id="chart-grid" class="chart-grid"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="chart-modal" class="chart-modal" hidden>
+    <div class="chart-modal-backdrop" data-close-modal="true"></div>
+    <div class="chart-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="chart-modal-title">
+      <div class="chart-modal-header">
+        <h3 id="chart-modal-title">Expanded Chart</h3>
+        <button id="chart-modal-close" type="button" class="secondary subtle-btn">Close</button>
+      </div>
+      <div id="chart-modal-surface" class="chart-modal-surface"></div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
