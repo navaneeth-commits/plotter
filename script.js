@@ -1,6 +1,8 @@
 const state = {
+  rawRows: [],
   rows: [],
   sampleRows: [],
+  normalizedDateRows: [],
   columns: [],
   numericColumns: [],
   dateColumns: [],
@@ -17,6 +19,7 @@ const ANALYSIS_SAMPLE_LIMIT = 1000;
 const PREVIEW_ROW_LIMIT = 8;
 const DELIMITER_CANDIDATES = [",", "\t", ";", "|"];
 const MAX_GROUPS = 20;
+const EMPTY_LIKE_VALUES = new Set(["", "null", "n/a", "na", "-"]);
 
 const fileInput = document.getElementById("file-input");
 const fileStatus = document.getElementById("file-status");
@@ -48,6 +51,7 @@ const columnSearch = document.getElementById("column-search");
 const columnFilterTabs = document.getElementById("column-filter-tabs");
 const selectorGroups = document.getElementById("selector-groups");
 const processingHint = document.getElementById("processing-hint");
+const selectorWarning = document.getElementById("selector-warning");
 let chartCounter = 0;
 
 // State helpers
@@ -109,6 +113,10 @@ document.addEventListener("keydown", (event) => {
 columnSearch.addEventListener("input", (event) => {
   state.columnSearchTerm = event.target.value.trim().toLowerCase();
   renderColumnMeta();
+});
+chartOptions.addEventListener("change", updateSelectorWarning);
+[xAxisSelect, yAxisSelect, groupAxisSelect].forEach((select) => {
+  select.addEventListener("change", updateSelectorWarning);
 });
 columnFilterTabs.addEventListener("click", (event) => {
   const filterButton = event.target.closest("[data-filter]");
@@ -379,21 +387,31 @@ function hydrateDataset(rows, fileName) {
   }
 
   const normalizedRows = rows.map((row) => normalizeRow(row, columns));
-  const populatedRows = normalizedRows.filter((row) => columns.some((column) => String(row[column]).trim() !== ""));
-  if (!populatedRows.length) {
+  const populatedRawRows = normalizedRows.filter((row) => columns.some((column) => String(row[column]).trim() !== ""));
+  if (!populatedRawRows.length) {
     handleFileError(fileName, "The file contains headers but no processable row values.");
     return;
   }
 
+  const cleanedRows = populatedRawRows.map((row) => cleanAndNormalizeRow(row, columns));
+  const populatedRows = cleanedRows.filter((row) => columns.some((column) => row[column] !== null));
+  if (!populatedRows.length) {
+    handleFileError(fileName, "The file contains only empty or invalid row values after cleaning.");
+    return;
+  }
+
   const sampleRows = populatedRows.slice(0, ANALYSIS_SAMPLE_LIMIT);
+  const normalizedDateRows = populatedRows.map((row) => buildNormalizedDateRow(row, columns));
   const numericColumns = columns.filter((column) => isNumericColumn(sampleRows, column));
-  const dateColumns = columns.filter((column) => isDateColumn(sampleRows, column));
+  const dateColumns = columns.filter((column) => isDateColumn(sampleRows, normalizedDateRows, column));
   const idColumns = columns.filter((column) => isIdColumn(sampleRows, column, numericColumns, dateColumns));
   const categoryColumns = columns.filter((column) => isCategoryColumn(sampleRows, column, numericColumns, dateColumns, idColumns));
   const otherColumns = columns.filter((column) => !numericColumns.includes(column) && !dateColumns.includes(column) && !idColumns.includes(column) && !categoryColumns.includes(column));
 
+  state.rawRows = populatedRawRows;
   state.rows = populatedRows;
   state.sampleRows = sampleRows;
+  state.normalizedDateRows = normalizedDateRows;
   state.columns = columns;
   state.numericColumns = numericColumns;
   state.dateColumns = dateColumns;
@@ -404,7 +422,7 @@ function hydrateDataset(rows, fileName) {
   state.columnSearchTerm = "";
   state.fileName = fileName;
 
-  setProcessing(false, `${fileName} loaded. ${populatedRows.length} rows detected.`);
+  setProcessing(false, `${fileName} loaded. ${populatedRows.length} cleaned rows detected.`);
 
   updateSelectors();
   updateSummary();
@@ -437,27 +455,53 @@ function normalizeRow(row, columns) {
   }, {});
 }
 
+function cleanAndNormalizeRow(row, columns) {
+  return columns.reduce((record, column) => {
+    record[column] = normalizeCellValue(row[column]);
+    return record;
+  }, {});
+}
+
+function normalizeCellValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+  }
+
+  const normalized = String(value).trim();
+  if (EMPTY_LIKE_VALUES.has(normalized.toLowerCase())) {
+    return null;
+  }
+
+  return normalized;
+}
+
 function isNumericColumn(rows, column) {
   const values = collectColumnValues(rows, column);
   if (!values.length) {
     return false;
   }
-  return values.every((value) => Number.isFinite(Number(value)));
+  return values.every((value) => Number.isFinite(parseNumericValue(value)));
 }
 
-function isDateColumn(rows, column) {
-  const values = collectColumnValues(rows, column).slice(0, 50);
+function isDateColumn(rows, normalizedDateRows, column) {
+  const values = rows
+    .map((_, index) => normalizedDateRows[index]?.[column])
+    .filter((value) => value !== null)
+    .slice(0, 50);
 
   if (!values.length) {
     return false;
   }
 
-  const matches = values.filter((value) => {
-    const timestamp = Date.parse(value);
-    return Number.isFinite(timestamp) && !/^\d+$/.test(value);
-  }).length;
-
-  return matches / values.length >= 0.7;
+  return values.length / Math.min(rows.length, 50) >= 0.7;
 }
 
 function isCategoryColumn(rows, column, numericColumns, dateColumns, idColumns) {
@@ -496,12 +540,60 @@ function isIdColumn(rows, column, numericColumns, dateColumns) {
 function collectColumnValues(rows, column) {
   const values = [];
   for (let index = 0; index < rows.length; index += 1) {
-    const value = String(rows[index][column]).trim();
-    if (value) {
+    const value = rows[index][column];
+    if (value !== null && value !== undefined && String(value).trim() !== "") {
       values.push(value);
     }
   }
   return values;
+}
+
+function parseNumericValue(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : NaN;
+  }
+
+  if (value === null || value === undefined) {
+    return NaN;
+  }
+
+  const normalized = String(value)
+    .trim()
+    .replace(/[$€£¥₹,\s]/g, "")
+    .replace(/\((.+)\)/, "-$1");
+
+  if (!normalized) {
+    return NaN;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function parseDateValue(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    const timestamp = value.getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+
+  const normalized = String(value).trim();
+  if (!normalized || /^\d+$/.test(normalized)) {
+    return null;
+  }
+
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function buildNormalizedDateRow(row, columns) {
+  return columns.reduce((record, column) => {
+    record[column] = parseDateValue(row[column]);
+    return record;
+  }, {});
 }
 
 function updateSelectors() {
@@ -512,6 +604,7 @@ function updateSelectors() {
   xAxisSelect.value = state.columns[0] || "";
   yAxisSelect.value = state.numericColumns[0] || state.columns[1] || state.columns[0] || "";
   groupAxisSelect.value = "None";
+  updateSelectorWarning();
 }
 
 function populateSelect(select, options) {
@@ -587,8 +680,7 @@ function renderPreview() {
 function clearCharts() {
   chartGrid.innerHTML = "";
   chartCounter = 0;
-  chartMessage.textContent = "Choose charts, add them to the dashboard, or build a smart dashboard. Tip: click any chart card to expand it.";
-  chartMessage.hidden = false;
+  setChartAreaMessage("Choose charts, add them to the dashboard, or build a smart dashboard. Tip: click any chart card to expand it.");
 }
 
 function renderRecommendations() {
@@ -626,7 +718,8 @@ function buildRecommendations() {
   const suggestions = [];
   const rankedCategories = [...state.categoryColumns].sort((left, right) => getCategoryScore(right) - getCategoryScore(left));
   const rankedMeasures = [...state.numericColumns].sort((left, right) => getNumericScore(right) - getNumericScore(left));
-  const dateColumn = state.dateColumns[0] || null;
+  const rankedDates = [...state.dateColumns].sort((left, right) => getDateScore(right) - getDateScore(left));
+  const dateColumn = rankedDates[0] || null;
   const category = rankedCategories[0] || null;
   const categoryAlt = rankedCategories[1] || null;
   const measure = rankedMeasures[0] || null;
@@ -695,7 +788,7 @@ function buildRecommendations() {
   }
 
   if (!dateColumn && measure && state.columns[0] && state.columns[0] !== measure) {
-    const fallbackX = rankedCategories[0] || state.columns[0];
+    const fallbackX = rankedCategories[0] || state.dateColumns[0] || state.columns.find((column) => column !== measure) || state.columns[0];
     suggestions.push({
       chartType: "line",
       x: fallbackX,
@@ -707,13 +800,13 @@ function buildRecommendations() {
   }
 
   return dedupeRecommendations(suggestions)
-    .filter((suggestion) => canRenderChart(suggestion.chartType, suggestion.x, suggestion.y, state.numericColumns.includes(suggestion.y)))
+    .filter((suggestion) => canRenderChart(suggestion.chartType, suggestion.x, suggestion.y, suggestion.group).valid)
     .sort((left, right) => right.score - left.score)
     .slice(0, 5);
 }
 
 function getNumericScore(column) {
-  const values = collectColumnValues(state.sampleRows, column).map(Number).filter((value) => Number.isFinite(value));
+  const values = collectColumnValues(state.sampleRows, column).map(parseNumericValue).filter((value) => Number.isFinite(value));
   if (!values.length) {
     return 0;
   }
@@ -734,6 +827,15 @@ function getCategoryScore(column) {
   return uniqueCount <= MAX_GROUPS ? (1 - ratio) * 60 + uniqueCount : 0;
 }
 
+function getDateScore(column) {
+  const values = collectColumnValues(state.sampleRows, column);
+  if (!values.length) {
+    return 0;
+  }
+  const uniqueCount = new Set(values).size;
+  return uniqueCount >= 2 ? uniqueCount : 0;
+}
+
 function dedupeRecommendations(suggestions) {
   return suggestions.filter((suggestion, index, array) => index === array.findIndex((item) =>
     item.chartType === suggestion.chartType &&
@@ -752,75 +854,94 @@ function applyRecommendation(suggestion) {
     input.checked = input.value === suggestion.chartType;
   });
 
+  updateSelectorWarning();
   addChartCard(suggestion.chartType, suggestion.x, suggestion.y, suggestion.group);
 }
 
-function renderCharts() {
+async function renderCharts() {
   if (!state.rows.length) {
-    chartMessage.textContent = "Please upload a dataset first.";
-    chartMessage.hidden = false;
+    setChartAreaMessage("Please upload a dataset first.");
     return;
   }
 
   const selectedCharts = [...chartOptions.querySelectorAll("input:checked")].map((input) => input.value);
   if (!selectedCharts.length) {
-    chartMessage.textContent = "Pick at least one chart type.";
-    chartMessage.hidden = false;
+    setChartAreaMessage("Pick at least one chart type.");
     return;
   }
 
   const xColumn = xAxisSelect.value;
   const yColumn = yAxisSelect.value;
   const groupColumn = groupAxisSelect.value === "None" ? null : groupAxisSelect.value;
-  const numericY = state.numericColumns.includes(yColumn);
+  const inlineFeedback = getInlineSelectionFeedback(selectedCharts, xColumn, yColumn, groupColumn);
+  if (inlineFeedback) {
+    showSelectorWarning(inlineFeedback);
+  }
+
   showChartLoading("Building charts...");
+  await waitForNextPaint();
+
+  let renderedCount = 0;
 
   selectedCharts.forEach((chartType, index) => {
-    if (!canRenderChart(chartType, xColumn, yColumn, numericY)) {
-      return;
+    const result = addChartCard(chartType, xColumn, yColumn, groupColumn, index);
+    if (result) {
+      renderedCount += 1;
     }
-    addChartCard(chartType, xColumn, yColumn, groupColumn, index);
   });
 
-  if (!chartGrid.children.length) {
-    chartMessage.textContent = "The chosen columns do not fit the selected chart types.";
-    chartMessage.hidden = false;
+  if (!renderedCount) {
+    setChartAreaMessage("This chart cannot be generated with the selected columns. Please choose different columns.");
     return;
   }
   chartMessage.hidden = true;
+  chartMessage.classList.remove("is-loading");
   focusChartPanel();
 }
 
-function renderSmartDashboard() {
+async function renderSmartDashboard() {
   if (!state.rows.length) {
-    chartMessage.textContent = "Please upload a dataset first.";
-    chartMessage.hidden = false;
+    setChartAreaMessage("Please upload a dataset first.");
     return;
   }
 
   const suggestions = buildRecommendations();
   if (!suggestions.length) {
-    chartMessage.textContent = "No smart dashboard could be built from this dataset yet.";
-    chartMessage.hidden = false;
+    setChartAreaMessage("No smart dashboard could be built from this dataset yet. Try a dataset with at least one varied numeric column and one category or date column.");
     return;
   }
 
   showChartLoading("Building a smart dashboard...");
+  await waitForNextPaint();
+
+  let renderedCount = 0;
   suggestions.slice(0, 4).forEach((suggestion, index) => {
-    addChartCard(suggestion.chartType, suggestion.x, suggestion.y, suggestion.group, index);
+    const result = addChartCard(suggestion.chartType, suggestion.x, suggestion.y, suggestion.group, index);
+    if (result) {
+      renderedCount += 1;
+    }
   });
+
+  if (!renderedCount) {
+    setChartAreaMessage("No valid charts could be generated for the smart dashboard. Please adjust the dataset or choose different columns.");
+    return;
+  }
+
   chartMessage.hidden = true;
+  chartMessage.classList.remove("is-loading");
   focusChartPanel();
 }
 
 // Chart rendering
 function addChartCard(chartType, xColumn, yColumn, groupColumn, index = 0) {
-  const numericY = state.numericColumns.includes(yColumn);
-  if (!canRenderChart(chartType, xColumn, yColumn, numericY)) {
+  const validation = canRenderChart(chartType, xColumn, yColumn, groupColumn);
+  if (!validation.valid) {
+    addChartFeedbackCard(chartType, validation.message);
     return false;
   }
 
   chartMessage.hidden = true;
+  chartMessage.classList.remove("is-loading");
 
   const card = document.createElement("article");
   card.className = "chart-card";
@@ -879,6 +1000,11 @@ function addChartCard(chartType, xColumn, yColumn, groupColumn, index = 0) {
   chartGrid.appendChild(card);
 
   const config = buildPlotConfig(chartType, xColumn, yColumn, groupColumn);
+  if (!config.data.length) {
+    card.remove();
+    addChartFeedbackCard(chartType, "This chart cannot be generated with the selected columns. Please choose different columns.");
+    return false;
+  }
   Plotly.react(surface, config.data, config.layout, {
     responsive: true,
     displaylogo: false,
@@ -904,11 +1030,70 @@ function closeChartModal() {
   Plotly.purge(chartModalSurface);
 }
 
-function canRenderChart(chartType, xColumn, yColumn, numericY) {
-  if (["scatter", "line", "bar", "box", "histogram", "pie"].includes(chartType)) {
-    return Boolean(xColumn) && Boolean(yColumn) && numericY;
+function canRenderChart(chartType, xColumn, yColumn, groupColumn) {
+  const validation = validateChartSelection(chartType, xColumn, yColumn, groupColumn, state.sampleRows);
+  return {
+    valid: validation.valid,
+    message: validation.message,
+  };
+}
+
+function validateChartSelection(chartType, xColumn, yColumn, groupColumn, rows) {
+  if (!rows.length) {
+    return { valid: false, message: "Please upload a dataset first." };
   }
-  return false;
+
+  if (!chartType) {
+    return { valid: false, message: "Select at least one chart type." };
+  }
+
+  if (!xColumn || !state.columns.includes(xColumn)) {
+    return { valid: false, message: "Choose a valid X axis or category column." };
+  }
+
+  if (!yColumn || !state.columns.includes(yColumn)) {
+    return { valid: false, message: "Choose a valid Y axis or value column." };
+  }
+
+  if (groupColumn && !state.columns.includes(groupColumn)) {
+    return { valid: false, message: "Choose a valid group column or set Group / Color to None." };
+  }
+
+  if (!state.numericColumns.includes(yColumn)) {
+    return { valid: false, message: `${yColumn} must contain numeric values for this chart.` };
+  }
+
+  if (groupColumn) {
+    const groupValues = collectColumnValues(rows, groupColumn);
+    const uniqueGroups = new Set(groupValues).size;
+    if (!groupValues.length || uniqueGroups < 1) {
+      return { valid: false, message: "The selected group column has no usable values." };
+    }
+    if (uniqueGroups > MAX_GROUPS) {
+      return { valid: false, message: "The selected group column has too many unique values for a readable grouped chart." };
+    }
+  }
+
+  const validRows = getRenderableRows(rows, xColumn, yColumn, groupColumn);
+  if (validRows.length < 2) {
+    return { valid: false, message: "At least 2 valid data points are required to generate this chart." };
+  }
+
+  if (chartType === "pie") {
+    const pieRows = summarizeRows(validRows, xColumn, yColumn, groupColumn).filter((row) => parseNumericValue(row[yColumn]) > 0);
+    if (pieRows.length < 2) {
+      return { valid: false, message: "Pie charts need at least 2 categories with positive numeric values." };
+    }
+  }
+
+  if (chartType === "histogram") {
+    const numericValues = validRows.map((row) => parseNumericValue(row[yColumn])).filter((value) => Number.isFinite(value));
+    if (new Set(numericValues).size < 2) {
+      return { valid: false, message: "Histogram charts need varied numeric values." };
+    }
+  }
+
+  return { valid: true, message: "" };
 }
 
 function buildPlotConfig(chartType, xColumn, yColumn, groupColumn, isExpanded = false) {
@@ -916,8 +1101,8 @@ function buildPlotConfig(chartType, xColumn, yColumn, groupColumn, isExpanded = 
   const chartRows = getChartRows(chartType, xColumn, yColumn, groupColumn);
   const grouped = groupColumn ? groupRowsByColumn(chartRows, groupColumn) : { All: chartRows };
   const traces = Object.entries(grouped).map(([groupName, rows], index) => {
-    const xValues = rows.map((row) => row[xColumn]);
-    const yValues = rows.map((row) => Number(row[yColumn]));
+    const xValues = rows.map((row) => getChartDisplayValue(row, xColumn));
+    const yValues = rows.map((row) => parseNumericValue(row[yColumn]));
     const color = palette[index % palette.length];
 
     switch (chartType) {
@@ -997,7 +1182,7 @@ function buildPlotConfig(chartType, xColumn, yColumn, groupColumn, isExpanded = 
 }
 
 function getChartRows(chartType, xColumn, yColumn, groupColumn) {
-  const baseRows = state.rows.length > ANALYSIS_SAMPLE_LIMIT * 4 ? state.rows.slice(0, ANALYSIS_SAMPLE_LIMIT * 2) : state.rows;
+  const baseRows = getRenderableRows(state.rows, xColumn, yColumn, groupColumn);
 
   if (chartType === "bar" || chartType === "pie") {
     return summarizeRows(baseRows, xColumn, yColumn, groupColumn);
@@ -1006,15 +1191,37 @@ function getChartRows(chartType, xColumn, yColumn, groupColumn) {
   return baseRows;
 }
 
+function getRenderableRows(rows, xColumn, yColumn, groupColumn) {
+  return rows.filter((row) => {
+    const xValue = row[xColumn];
+    const yValue = parseNumericValue(row[yColumn]);
+    const hasValidX = xValue !== null && xValue !== undefined && String(xValue).trim() !== "";
+    const hasValidY = Number.isFinite(yValue);
+    const hasValidGroup = !groupColumn || (row[groupColumn] !== null && row[groupColumn] !== undefined && String(row[groupColumn]).trim() !== "");
+    return hasValidX && hasValidY && hasValidGroup;
+  });
+}
+
+function getChartDisplayValue(row, column) {
+  if (state.dateColumns.includes(column)) {
+    const timestamp = parseDateValue(row[column]);
+    if (timestamp !== null) {
+      return new Date(timestamp);
+    }
+  }
+
+  return row[column];
+}
+
 function summarizeRows(rows, xColumn, yColumn, groupColumn) {
   const groups = new Map();
 
   rows.forEach((row) => {
-    const categoryKey = String(row[xColumn] || "Unspecified");
+    const categoryKey = String(getChartDisplayValue(row, xColumn) || "Unspecified");
     const groupKey = groupColumn ? String(row[groupColumn] || "Unspecified") : "All";
     const key = `${groupKey}__${categoryKey}`;
     const current = groups.get(key) || { [xColumn]: categoryKey, [yColumn]: 0, [groupColumn || "__group"]: groupKey };
-    current[yColumn] += Number(row[yColumn]) || 0;
+    current[yColumn] += parseNumericValue(row[yColumn]) || 0;
     groups.set(key, current);
   });
 
@@ -1166,7 +1373,7 @@ function describeColumn(column) {
   }
 
   if (state.numericColumns.includes(column)) {
-    const numbers = values.map(Number);
+    const numbers = values.map(parseNumericValue).filter((value) => Number.isFinite(value));
     return `min ${formatNumber(Math.min(...numbers))}, max ${formatNumber(Math.max(...numbers))}`;
   }
 
@@ -1181,8 +1388,10 @@ function formatNumber(value) {
 }
 
 function resetApp() {
+  state.rawRows = [];
   state.rows = [];
   state.sampleRows = [];
+  state.normalizedDateRows = [];
   state.columns = [];
   state.numericColumns = [];
   state.dateColumns = [];
@@ -1206,6 +1415,8 @@ function resetApp() {
   columnMeta.innerHTML = "Load a file to inspect column types.";
   selectorGroups.innerHTML = "Load a file to browse grouped column options.";
   recommendations.innerHTML = "Load a file to see recommended plot combinations.";
+  selectorWarning.hidden = true;
+  selectorWarning.textContent = "";
   columnSearch.value = "";
   processingHint.hidden = true;
   updateFilterChips();
@@ -1216,10 +1427,90 @@ function resetApp() {
 
 // UI helpers
 function showChartLoading(message) {
+  setChartAreaMessage(message, { loading: true });
+}
+
+function setChartAreaMessage(message, options = {}) {
   chartMessage.textContent = message;
   chartMessage.hidden = false;
+  chartMessage.classList.toggle("is-loading", Boolean(options.loading));
 }
 
 function focusChartPanel() {
-  chartPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (window.innerWidth <= 920) {
+    chartPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function updateSelectorWarning() {
+  const selectedCharts = [...chartOptions.querySelectorAll("input:checked")].map((input) => input.value);
+  const feedback = getInlineSelectionFeedback(
+    selectedCharts,
+    xAxisSelect.value,
+    yAxisSelect.value,
+    groupAxisSelect.value === "None" ? null : groupAxisSelect.value
+  );
+
+  if (!feedback) {
+    selectorWarning.hidden = true;
+    selectorWarning.textContent = "";
+    return;
+  }
+
+  showSelectorWarning(feedback);
+}
+
+function getInlineSelectionFeedback(selectedCharts, xColumn, yColumn, groupColumn) {
+  if (!state.sampleRows.length || !selectedCharts.length) {
+    return "";
+  }
+
+  const failedCharts = selectedCharts
+    .map((chartType) => ({ chartType, ...canRenderChart(chartType, xColumn, yColumn, groupColumn) }))
+    .filter((result) => !result.valid);
+
+  if (!failedCharts.length) {
+    return "";
+  }
+
+  if (failedCharts.length === 1) {
+    return `${labelForChart(failedCharts[0].chartType)} chart: ${failedCharts[0].message}`;
+  }
+
+  return "Some selected chart types are not valid with the current column combination.";
+}
+
+function showSelectorWarning(message) {
+  selectorWarning.textContent = message;
+  selectorWarning.hidden = false;
+}
+
+function addChartFeedbackCard(chartType, message) {
+  chartMessage.hidden = true;
+  chartMessage.classList.remove("is-loading");
+
+  const card = document.createElement("article");
+  card.className = "chart-card is-feedback";
+
+  const header = document.createElement("div");
+  header.className = "chart-card-header";
+
+  const title = document.createElement("h3");
+  title.textContent = labelForChart(chartType);
+
+  header.appendChild(title);
+
+  const feedback = document.createElement("div");
+  feedback.className = "chart-feedback";
+  feedback.textContent = message || "This chart cannot be generated with the selected columns. Please choose different columns.";
+
+  card.appendChild(header);
+  card.appendChild(feedback);
+  chartGrid.appendChild(card);
+}
+
+function waitForNextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
 }
