@@ -249,6 +249,18 @@ h1 {
   margin-top: 16px;
 }
 
+.section {
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.controls-panel .section:last-of-type,
+.preview-panel .section:last-of-type,
+.chart-panel.section {
+  margin-bottom: 0;
+}
+
 .chart-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -336,11 +348,21 @@ button:hover {
 #generate-btn {
   background: var(--accent);
   color: white;
+  padding: 12px 18px;
+  box-shadow: 0 14px 28px rgba(239, 108, 51, 0.22);
 }
 
 #smart-dashboard-btn {
   background: #1f2937;
   color: white;
+  padding: 12px 18px;
+  box-shadow: 0 14px 28px rgba(31, 41, 55, 0.18);
+}
+
+#generate-btn:hover,
+#smart-dashboard-btn:hover {
+  transform: translateY(-2px);
+  filter: saturate(1.05);
 }
 
 button.secondary {
@@ -448,17 +470,17 @@ button.secondary {
 
 .meta-chip {
   border-radius: 999px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   background: rgba(31, 41, 55, 0.06);
   font-family: "IBM Plex Mono", monospace;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   line-height: 1.4;
 }
 
 .table-wrap {
   margin-top: 12px;
   overflow: auto;
-  max-height: 250px;
+  max-height: 190px;
   border-radius: 14px;
   border: 1px solid rgba(31, 41, 55, 0.08);
   background: rgba(255, 255, 255, 0.72);
@@ -472,10 +494,10 @@ table {
 
 th,
 td {
-  padding: 9px 10px;
+  padding: 6px 8px;
   text-align: left;
   border-bottom: 1px solid rgba(31, 41, 55, 0.08);
-  font-size: 0.84rem;
+  font-size: 0.78rem;
 }
 
 th {
@@ -485,7 +507,9 @@ th {
 }
 
 .chart-panel {
-  min-height: 420px;
+  min-height: 520px;
+  position: sticky;
+  top: 20px;
 }
 
 .chart-header {
@@ -628,8 +652,11 @@ th {
 }
 
 .empty-state {
-  padding: 10px 0;
+  padding: 18px 12px;
   font-size: 0.88rem;
+  text-align: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.45);
 }
 
 @keyframes pulse {
