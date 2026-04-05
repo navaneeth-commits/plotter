@@ -1,3 +1,4 @@
+Developed by Navaneeth Kumar Reddy
 # Data Canvas
 
 Data Canvas is a lightweight browser-based visualization site that lets you:
