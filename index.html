@@ -36,13 +36,13 @@
         <div id="file-status" class="status-pill muted">No file loaded yet.</div>
         <p id="processing-hint" class="inline-hint" hidden>Large files are sampled for analysis so chart setup stays responsive.</p>
 
-        <div class="config-block">
+        <div class="config-block section">
           <div class="config-head">
             <h3>Charts</h3>
             <p>Select one or more chart types.</p>
           </div>
           <div id="chart-options" class="chart-options">
-            <label><input type="checkbox" value="scatter" checked> Scatter</label>
+            <label><input type="checkbox" value="scatter"> Scatter</label>
             <label><input type="checkbox" value="line"> Line</label>
             <label><input type="checkbox" value="bar"> Bar</label>
             <label><input type="checkbox" value="histogram"> Histogram</label>
@@ -51,7 +51,7 @@
           </div>
         </div>
 
-        <div class="config-block selectors">
+        <div class="config-block selectors section">
           <div>
             <label for="x-axis">X Axis / Category</label>
             <select id="x-axis" title="Choose a category, label, or date field for the horizontal axis"></select>
@@ -67,7 +67,7 @@
         </div>
         <p id="selector-warning" class="selector-warning" hidden></p>
 
-        <div class="config-block selector-help">
+        <div class="config-block selector-help section">
           <div id="selector-groups" class="selector-groups empty-state">
             Load a file to browse grouped column options.
           </div>
@@ -80,7 +80,7 @@
           <button id="clear-btn" type="button" class="secondary">Reset All</button>
         </div>
 
-        <div class="config-block">
+        <div class="config-block section">
           <div class="config-head">
             <h3>Recommendations</h3>
             <p>Suggested chart and field combinations.</p>
@@ -98,7 +98,7 @@
             <p>Preview, inferred types, and quick stats.</p>
           </div>
 
-          <div id="dataset-summary" class="summary-grid">
+          <div id="dataset-summary" class="summary-grid section">
             <article>
               <span>Rows</span>
               <strong id="row-count">0</strong>
@@ -113,7 +113,7 @@
             </article>
           </div>
 
-          <div class="inspect-tools">
+          <div class="inspect-tools section">
             <label class="search-field" for="column-search">
               <span>Search Columns</span>
               <input id="column-search" type="search" placeholder="Search by column name">
@@ -132,7 +132,7 @@
             Load a file to inspect column types.
           </div>
 
-          <div class="table-wrap">
+          <div class="table-wrap section">
             <table id="preview-table">
               <thead></thead>
               <tbody></tbody>
@@ -140,7 +140,7 @@
           </div>
         </section>
 
-        <section class="panel chart-panel">
+        <section class="panel chart-panel section">
           <div class="panel-header chart-header">
             <div>
               <h2>Dashboard</h2>
