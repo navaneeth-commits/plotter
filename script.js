@@ -116,7 +116,10 @@ columnSearch.addEventListener("input", (event) => {
 });
 chartOptions.addEventListener("change", updateSelectorWarning);
 [xAxisSelect, yAxisSelect, groupAxisSelect].forEach((select) => {
-  select.addEventListener("change", updateSelectorWarning);
+  select.addEventListener("change", () => {
+    syncSelectorOptions();
+    updateSelectorWarning();
+  });
 });
 columnFilterTabs.addEventListener("click", (event) => {
   const filterButton = event.target.closest("[data-filter]");
@@ -597,14 +600,27 @@ function buildNormalizedDateRow(row, columns) {
 }
 
 function updateSelectors() {
-  populateSelect(xAxisSelect, buildSelectorOptions("x"));
-  populateSelect(groupAxisSelect, buildSelectorOptions("group", true));
-  populateSelect(yAxisSelect, buildSelectorOptions("y"));
-
-  xAxisSelect.value = state.columns[0] || "";
-  yAxisSelect.value = state.numericColumns[0] || state.columns[1] || state.columns[0] || "";
+  syncSelectorOptions();
+  xAxisSelect.value = "None";
+  yAxisSelect.value = "None";
   groupAxisSelect.value = "None";
   updateSelectorWarning();
+}
+
+function syncSelectorOptions() {
+  const currentSelection = {
+    x: xAxisSelect.value || "None",
+    y: yAxisSelect.value || "None",
+    group: groupAxisSelect.value || "None",
+  };
+
+  populateSelect(xAxisSelect, buildSelectorOptions("x", true, { exclude: [currentSelection.y, currentSelection.group] }));
+  populateSelect(yAxisSelect, buildSelectorOptions("y", true, { exclude: [currentSelection.x, currentSelection.group] }));
+  populateSelect(groupAxisSelect, buildSelectorOptions("group", true, { exclude: [currentSelection.x, currentSelection.y] }));
+
+  xAxisSelect.value = optionExists(xAxisSelect, currentSelection.x) ? currentSelection.x : "None";
+  yAxisSelect.value = optionExists(yAxisSelect, currentSelection.y) ? currentSelection.y : "None";
+  groupAxisSelect.value = optionExists(groupAxisSelect, currentSelection.group) ? currentSelection.group : "None";
 }
 
 function populateSelect(select, options) {
@@ -626,8 +642,15 @@ function populateSelect(select, options) {
     const element = document.createElement("option");
     element.value = item.value;
     element.textContent = item.label;
+    if (item.disabled) {
+      element.disabled = true;
+    }
     select.appendChild(element);
   });
+}
+
+function optionExists(select, value) {
+  return [...select.options].some((option) => option.value === value);
 }
 
 function updateSummary() {
@@ -648,7 +671,8 @@ function renderColumnMeta() {
     const chip = document.createElement("div");
     chip.className = "meta-chip";
     const type = inferColumnRole(column);
-    chip.textContent = `${column} : ${type} : ${describeColumn(column)}`;
+    chip.textContent = `${column} (${type})`;
+    chip.title = describeColumn(column);
     columnMeta.appendChild(chip);
   });
 }
@@ -680,7 +704,7 @@ function renderPreview() {
 function clearCharts() {
   chartGrid.innerHTML = "";
   chartCounter = 0;
-  setChartAreaMessage("Choose charts, add them to the dashboard, or build a smart dashboard. Tip: click any chart card to expand it.");
+  setChartAreaMessage("No charts yet. Select columns and click 'Add to Dashboard' to visualize your data.");
 }
 
 function renderRecommendations() {
@@ -846,6 +870,10 @@ function dedupeRecommendations(suggestions) {
 }
 
 function applyRecommendation(suggestion) {
+  xAxisSelect.value = suggestion.x;
+  yAxisSelect.value = suggestion.y;
+  groupAxisSelect.value = suggestion.group || "None";
+  syncSelectorOptions();
   xAxisSelect.value = suggestion.x;
   yAxisSelect.value = suggestion.y;
   groupAxisSelect.value = suggestion.group || "None";
@@ -1267,11 +1295,18 @@ function labelForChart(chartType) {
   return labels[chartType] || "Chart";
 }
 
-function buildSelectorOptions(target, includeNone = false) {
+function buildSelectorOptions(target, includeNone = false, config = {}) {
   const options = [];
   if (includeNone) {
-    options.push({ type: "option", value: "None", label: "None" });
+    const placeholderLabels = {
+      x: "Select X Axis",
+      y: "Select Y Axis",
+      group: "Select Group / Color",
+    };
+    options.push({ type: "option", value: "None", label: placeholderLabels[target] || "None" });
   }
+
+  const excludedColumns = new Set((config.exclude || []).filter((value) => value && value !== "None"));
 
   const groups = [
     { key: "numeric", label: "Numeric Columns", columns: state.numericColumns },
@@ -1282,7 +1317,7 @@ function buildSelectorOptions(target, includeNone = false) {
   ];
 
   groups.forEach((group) => {
-    let columns = group.columns;
+    let columns = group.columns.filter((column) => !excludedColumns.has(column));
     if (target === "y" && group.key !== "numeric") {
       columns = [];
     }
@@ -1300,7 +1335,9 @@ function buildSelectorOptions(target, includeNone = false) {
     options.push({
       type: "group",
       label: "All Columns",
-      options: state.columns.map((column) => ({ value: column, label: column })),
+      options: state.columns
+        .filter((column) => !excludedColumns.has(column))
+        .map((column) => ({ value: column, label: column })),
     });
   }
 
