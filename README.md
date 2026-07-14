@@ -32,7 +32,7 @@ Data Canvas is a data visualization app with an AI-assisted smart dashboard flow
 ## Current features
 
 - drag-and-drop or file-picker upload
-- automatic parsing for delimited text files
+- automatic parsing for delimited text files    
 - spreadsheet parsing using the first worksheet
 - inferred numeric, category, date, and id-like column detection
 - scatter, line, bar, histogram, box, and pie charts
