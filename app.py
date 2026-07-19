@@ -7,8 +7,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from typing import Any
 
+from dotenv import load_dotenv
 from google import genai
 from flask import Flask, jsonify, request
+
+load_dotenv()  # reads the .env file (if present) and loads it into os.environ
 
 app = Flask(__name__)
 
